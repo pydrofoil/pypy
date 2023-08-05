@@ -47,6 +47,11 @@ class TestW_LongObject:
         assert space.eq_w(z, space.newint(1))
         assert not isinstance(z, lobj.W_LongObject)
 
+    def test_space_newlong_gives_int(self):
+        space = self.space
+        w_x = space.newlong(2)
+        assert not isinstance(w_x, lobj.W_LongObject)
+
 class AppTestLong:
 
     def w__long(self, obj):
@@ -246,6 +251,15 @@ class AppTestLong:
         assert pow(x, 2) == long(4)
         assert pow(x, 2, 2) == long(0)
         assert pow(x, 2, long(3)) == long(1)
+
+    def test_issue_3912(self):
+
+        class A(int):
+            # A class that uses the default 0 value but does not override __pow__
+            def __rpow__(self, other, modulo):
+                return None
+
+        raises(ValueError, pow, 1, A(), A())
 
     def test_getnewargs(self):
         assert  self._long(0) .__getnewargs__() == (self._long(0),)

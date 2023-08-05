@@ -465,11 +465,8 @@ class W_ListObject(W_Root):
         w_obj.clear(space)
         return w_obj
 
-    def descr_init(self, space, __args__):
+    def descr_init(self, space, w_iterable=None, __posonly__=None):
         """Initialize self.  See help(type(self)) for accurate signature."""
-        # this is on the silly side
-        w_iterable, = __args__.parse_obj(
-                None, 'list', init_signature, init_defaults)
         self.clear(space)
         if w_iterable is not None:
             self.extend(w_iterable)
@@ -587,10 +584,16 @@ class W_ListObject(W_Root):
         self.inplace_mul(times)
         return self
 
+    def _unpack_slice(self, w_index):
+        # important: unpack the slice before computing the length. the
+        # __index__ methods can mutate the list and change its length.
+        start, stop, step = w_index.unpack(self.space)
+        length = self.length()
+        return w_index.adjust_indices(start, stop, step, length)
+
     def descr_getitem(self, space, w_index):
         if isinstance(w_index, W_SliceObject):
-            length = self.length()
-            start, stop, step, slicelength = w_index.indices4(space, length)
+            start, stop, step, slicelength = self._unpack_slice(w_index)
             assert slicelength >= 0
             if slicelength == 0:
                 return make_empty_list(space)
@@ -620,8 +623,7 @@ class W_ListObject(W_Root):
                 w_other.copy_into(self)
                 return
 
-            oldsize = self.length()
-            start, stop, step, slicelength = w_index.indices4(space, oldsize)
+            start, stop, step, slicelength = self._unpack_slice(w_index)
             if isinstance(w_any, W_ListObject):
                 w_other = w_any
             else:
@@ -638,8 +640,7 @@ class W_ListObject(W_Root):
 
     def descr_delitem(self, space, w_idx):
         if isinstance(w_idx, W_SliceObject):
-            start, stop, step, slicelength = w_idx.indices4(
-                    space, self.length())
+            start, stop, step, slicelength = self._unpack_slice(w_idx)
             self.deleteslice(start, step, slicelength)
             return
 
@@ -2299,11 +2300,6 @@ def plain_int_w(space, w_obj):
     # used only for objects for which is_plain_int1() returned True;
     # for that use case it should never raise.
     return w_obj._int_w(space)
-
-# _______________________________________________________
-
-init_signature = Signature(['sequence'], posonlyargcount=1)
-init_defaults = [None]
 
 
 # ____________________________________________________________

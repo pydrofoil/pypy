@@ -106,8 +106,8 @@ class AppTestTypeObject(AppTestCpythonExtensionBase):
         raises(TypeError, "obj.char_member = 'spam'")
         raises(TypeError, "obj.char_member = 42")
         #
-        import sys
-        bignum = sys.maxsize - 42
+        import sys, struct
+        bignum = struct.unpack_from("@L", b"\xFF" * 8)[0]//2 - 42
         obj.short_member = -12345;     assert obj.short_member == -12345
         obj.long_member = -bignum;     assert obj.long_member == -bignum
         obj.ushort_member = 45678;     assert obj.ushort_member == 45678
@@ -1082,6 +1082,48 @@ class AppTestSlots(AppTestCpythonExtensionBase):
         assert type(it) is type(iter([]))
         x = list(it)
         assert x == [1]
+
+    def test_gen_tp_iter(self):
+        """
+        module = self.import_extension('foo', [
+           ("gen_tp_iternext", "METH_VARARGS",
+            '''
+                 PyObject *obj = PyTuple_GET_ITEM(args, 0);
+                 iternextfunc next = Py_TYPE(obj)->tp_iternext;
+                 PyObject *result = next(obj);
+                 /* In py3, returning NULL from tp_iternext means the iterator
+                  * is exhausted, and the result is given in a StopIteration object */
+                 if (!result) {
+                     if (!PyErr_Occurred()) {
+                         PyErr_SetString(PyExc_AssertionError, "No StopIteration with NULL return value");
+                         return NULL;
+                     }
+
+                     PyObject *ptype, *pvalue, *ptraceback;
+                     PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+                     if (PyErr_GivenExceptionMatches(pvalue, PyExc_StopIteration)) {
+                         result = PyObject_GetAttrString(pvalue, "value");
+                         Py_XDECREF(pvalue);
+                     }
+                     else {
+                         result = pvalue;
+                     }
+                     Py_XDECREF(ptype);
+                     Py_XDECREF(ptraceback);
+                 }
+                 return result;
+             '''
+             )
+            ])
+
+        def generator():
+            yield 1
+            return 3
+
+        gen = generator()
+        assert module.gen_tp_iternext(gen) == 1
+        assert module.gen_tp_iternext(gen) == 3
+        """
 
     def test_intlike(self):
         module = self.import_extension('foo', [
@@ -2272,3 +2314,26 @@ class AppTestFlags(AppTestCpythonExtensionBase):
         # Make sure o.tp_dealloc was called
         new_list = module.global_list[:]
         assert len(new_list) == len(old_list) + 1, "%s %s" %(old_list, new_list)
+
+    def test_issubclass(self):
+        # issue 3976
+        module = self.import_extension("foo", [
+            ("issubclass", "METH_VARARGS",
+             """
+                PyObject *x = NULL, *y = NULL;
+                if (!PyArg_ParseTuple(args, "OO", &x, &y)) {
+                    return NULL;
+                }
+                if (!PyType_Check(x) | !PyType_Check(y))
+                    return PyLong_FromLong(42);
+                int subtype = PyType_IsSubtype((PyTypeObject *) x, (PyTypeObject *) y);
+                return PyLong_FromLong(subtype);
+             """)])
+        class Base: pass
+        class A(Base): pass
+        class B(Base): pass
+        assert not issubclass(B, A)
+        assert not module.issubclass(B, A)
+        B.__bases__ = (A,)
+        assert issubclass(B, A)
+        assert module.issubclass(B, A)
